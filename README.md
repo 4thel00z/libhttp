@@ -1,6 +1,6 @@
 # libhttp
 
-![libdns-tests](https://github.com/4thel00z/libhttp/workflows/Test/badge.svg)
+![libhttp-tests](https://github.com/4thel00z/libhttp/workflows/Test/badge.svg)
 
 ## Introduction
 
