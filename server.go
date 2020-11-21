@@ -2,6 +2,7 @@ package libhttp
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -97,6 +98,49 @@ func Serve(svc Service, l net.Listener) (*Server, error) {
 	return s, nil
 }
 
+// Serve starts a HTTPS server, binding the passed Service to the passed listener.
+func ServeTLS(svc Service, l net.Listener, certFile, keyFile string, cfg *tls.Config, ) (*Server, error) {
+	s := &Server{
+		l:            l,
+		shuttingDown: make(chan struct{})}
+	svc = svc.Filter(func(req Request, svc Service) Response {
+		req.server = s
+		return svc(req)
+	})
+	if cfg == nil {
+		cfg = &tls.Config{
+			MinVersion:               tls.VersionTLS12,
+			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+			PreferServerCipherSuites: true,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+				tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+			},
+		}
+	}
+
+	s.srv = &http.Server{
+		Handler:        HttpHandler(svc),
+		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
+		TLSConfig:      cfg,
+		TLSNextProto:   make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
+	}
+
+	go func() {
+		err := s.srv.ServeTLS(l, certFile, keyFile)
+		if err != nil && err != http.ErrServerClosed {
+			slog.Error(nil, "HTTP server error: %v", err)
+			// Stopping with an already-closed context means we go immediately to "forceful" mode
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			s.Stop(ctx)
+		}
+	}()
+	return s, nil
+}
+
 func Listen(svc Service, addr string) (*Server, error) {
 	// Determine on which address to listen, choosing in order one of:
 	// 1. The passed addr
@@ -121,4 +165,30 @@ func Listen(svc Service, addr string) (*Server, error) {
 		return nil, err
 	}
 	return Serve(svc, l)
+}
+
+func ListenTLS(svc Service, addr, certFile, keyFile string, cfg *tls.Config, ) (*Server, error) {
+	// Determine on which address to listen, choosing in order one of:
+	// 1. The passed addr
+	// 2. PORT variable (listening on all interfaces)
+	// 3. Random, available port, on the loopback interface only
+	if addr == "" {
+		if _addr := os.Getenv("LISTEN_ADDR"); _addr != "" {
+			addr = _addr
+		} else if port, err := strconv.Atoi(os.Getenv("PORT")); err == nil && port >= 0 {
+			addr = fmt.Sprintf(":%d", port)
+		} else {
+			addr = ":0"
+		}
+	}
+	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	l, err := net.ListenTCP("tcp", tcpAddr)
+	if err != nil {
+		return nil, err
+	}
+	return ServeTLS(svc, l, certFile, keyFile, cfg)
 }
