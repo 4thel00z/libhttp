@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -191,4 +192,51 @@ func ListenTLS(svc Service, addr, certFile, keyFile string, cfg *tls.Config, ) (
 		return nil, err
 	}
 	return ServeTLS(svc, l, certFile, keyFile, cfg)
+}
+
+func ListenUnix(svc Service, path string) (*Server, error, func()) {
+	// Determine on which address to listen, choosing in order one of:
+	// 1. The passed addr
+	// 2. PORT variable (listening on all interfaces)
+	// 3. Random, available port, on the loopback interface only
+	if path == "" {
+		if _addr := os.Getenv("LISTEN_PATH"); _addr != "" {
+			path = _addr
+		} else {
+			path = os.TempDir()
+			log.Printf("Serving on %s\n", path)
+		}
+	}
+
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		return nil, err, nil
+	}
+
+	server, err := Serve(svc, l)
+	return server, err, func() {
+		os.Remove(path)
+	}
+}
+
+func ListenUnixTLS(svc Service, path, certFile, keyFile string, cfg *tls.Config, ) (*Server, error, func()) {
+	// Determine on which address to listen, choosing in order one of:
+	// 1. The passed addr
+	// 2. PORT variable (listening on all interfaces)
+	// 3. Random, available port, on the loopback interface only
+	if path == "" {
+		if _addr := os.Getenv("LISTEN_PATH"); _addr != "" {
+			path = _addr
+		} else {
+			path = os.TempDir()
+			log.Printf("Serving on %s\n", path)
+		}
+	}
+
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		return nil, err, nil
+	}
+	server, err := ServeTLS(svc, l, certFile, keyFile, cfg)
+	return server, err, func() { _ = os.Remove(path) }
 }
