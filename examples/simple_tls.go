@@ -22,7 +22,7 @@ func main() {
 	svc := router.Serve().
 		Filter(libhttp.ErrorFilter).
 		Filter(libhttp.H2cFilter).
-		Filter(libhttp.HSTSFilter(63072000))
+		Filter(libhttp.HSTSFilter(libhttp.HSTSDefaultMaxAge))
 
 	// using nil for cfg uses a very good default configuration which has perfect SSL labs score..
 	srv, err := libhttp.ListenTLS(svc, ":1234", "tls.cert", "tls.key", nil)
